@@ -32,8 +32,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Busca inicial
-        fetchEvents("Austin")
+        //Initial Search later will use GPS location of the user
+        fetchEvents("Dublin")
 
         setContent {
             var city by remember { mutableStateOf("") }
@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
+//Use the API to search events
     private fun fetchEvents(city: String) {
         val apiKey = com.example.mobileapp.BuildConfig.SERPAPI_KEY
         val query = "Events in $city"
@@ -132,16 +132,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
+//Each event card
 @Composable
 fun EventCard(event: EventItem) {
-    Column(
+    androidx.compose.material3.Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = 6.dp),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Text(text = event.title)
-        Text(text = event.address?.joinToString(", ") ?: "No address")
-        Text(text = event.date?.whenText ?: "No date")
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            //Name
+            Text(
+                text = event.title ?: "No title",
+                style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            //Local
+            Text(
+                text = event.address?.joinToString(", ") ?: "No address",
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                    color = androidx.compose.ui.graphics.Color.Gray
+                )
+            )
+
+            //Date
+            Text(
+                text = event.date?.whenText ?: "No date",
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall.copy(
+                    color = androidx.compose.ui.graphics.Color.Gray
+                )
+            )
+        }
     }
 }
+
