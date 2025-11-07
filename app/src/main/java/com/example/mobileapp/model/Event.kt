@@ -8,7 +8,7 @@ data class EventsResponse(
 )
 
 data class EventItem(
-    val title: String?,
+    val title: String,
     val address: List<String>?,
     val date: EventDate?
 )

@@ -15,23 +15,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.GET
-import retrofit2.http.QueryMap
-import com.example.mobileapp.model.EventsResponse
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import com.example.mobileapp.model.EventItem
-
-// Retrofit interface for SerpApi
-private interface SerpApiService {
-    @GET("search.json")
-    suspend fun searchEvents(@QueryMap params: Map<String, String>): retrofit2.Response<EventsResponse>
-}
+import com.example.mobileapp.model.EventDate
 
 class MainActivity : ComponentActivity() {
 
-    // Lista observável de eventos (visível ao Compose)
     private val eventList = mutableStateListOf<EventItem>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,43 +33,38 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         // Busca inicial
-        fetchEvents("Dublin")
+        fetchEvents("Austin")
 
         setContent {
-            var searchText by remember { mutableStateOf("") }
+            var city by remember { mutableStateOf("") }
 
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                // Campo de busca simples
                 TextField(
-                    value = searchText,
-                    onValueChange = { searchText = it },
+                    value = city,
+                    onValueChange = { city = it },
                     label = { Text("Search events by city") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Botão que dispara a busca — evita usar IME / KeyboardOptions
                 Button(
                     onClick = {
-                        val query = searchText.trim()
-                        if (query.isNotEmpty()) {
-                            fetchEvents(query)
-                        }
+                        val query = city.trim()
+                        if (query.isNotEmpty()) fetchEvents(query)
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(text = "Search")
+                    Text("Search")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Lista de eventos
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn {
                     items(eventList) { event ->
                         EventCard(event)
                     }
@@ -84,42 +73,66 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Função que faz a chamada à SerpApi (não composable)
-    private fun fetchEvents(location: String) {
+    private fun fetchEvents(city: String) {
+        val apiKey = com.example.mobileapp.BuildConfig.SERPAPI_KEY
+        val query = "Events in $city"
+
+        val url =
+            "https://serpapi.com/search.json?engine=google_events&q=${query.replace(" ", "+")}&hl=en&gl=us&api_key=$apiKey"
+
+        val client = OkHttpClient()
+        val request = Request.Builder().url(url).build()
+
         lifecycleScope.launch {
-            val retrofit = Retrofit.Builder()
-                .baseUrl("https://serpapi.com/")
-                .addConverterFactory(GsonConverterFactory.create())
-                .build()
-
-            val service = retrofit.create(SerpApiService::class.java)
-
-            val params = mapOf(
-                "engine" to "google_events",
-                "q" to "Events in $location",
-                "hl" to "en",
-                "gl" to "ie",
-                "api_key" to com.example.mobileapp.BuildConfig.SERPAPI_KEY
-            )
-
             try {
-                val response = service.searchEvents(params)
-                if (response.isSuccessful) {
-                    val events = response.body()?.eventsResults ?: emptyList()
-                    eventList.clear()
-                    eventList.addAll(events)
-                    Log.d("SerpApi", "Loaded ${events.size} events for $location.")
-                } else {
-                    Log.e("SerpApi", "Error: ${response.code()} - ${response.errorBody()?.string()}")
+                val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+                val body = response.body?.string()
+
+                if (body.isNullOrEmpty()) {
+                    Log.e("SerpApi", "Empty response body.")
+                    return@launch
                 }
+
+                val json = JSONObject(body)
+                val results = json.optJSONArray("events_results")
+
+                eventList.clear()
+                if (results != null) {
+                    for (i in 0 until results.length()) {
+                        val obj = results.getJSONObject(i)
+                        val title = obj.optString("title", "No title")
+
+                        val addressArr = obj.optJSONArray("address")
+                        val addressList = mutableListOf<String>()
+                        if (addressArr != null) {
+                            for (j in 0 until addressArr.length()) {
+                                addressList.add(addressArr.getString(j))
+                            }
+                        }
+
+                        val dateObj = obj.optJSONObject("date")
+                        val whenText = dateObj?.optString("when", "No date") ?: "No date"
+
+                        eventList.add(
+                            EventItem(
+                                title = title ?: "No title",
+                                address = addressList,
+                                date = EventDate(startDate = "", whenText = whenText)
+                            )
+                        )
+                    }
+                    Log.d("SerpApi", "Loaded ${eventList.size} events for $city.")
+                } else {
+                    Log.e("SerpApi", "No 'events_results' array found.")
+                }
+
             } catch (e: Exception) {
-                Log.e("SerpApi", "Exception: ${e.message}", e)
+                Log.e("SerpApi", "Error fetching events: ${e.message}", e)
             }
         }
     }
 }
 
-// Composable que mostra cada evento (simples)
 @Composable
 fun EventCard(event: EventItem) {
     Column(
@@ -127,9 +140,8 @@ fun EventCard(event: EventItem) {
             .fillMaxWidth()
             .padding(vertical = 8.dp)
     ) {
-        //Text(text = event.title)
+        Text(text = event.title)
         Text(text = event.address?.joinToString(", ") ?: "No address")
         Text(text = event.date?.whenText ?: "No date")
-
     }
 }
