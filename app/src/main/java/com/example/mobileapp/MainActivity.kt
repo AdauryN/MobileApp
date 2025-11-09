@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-//Each event card
+
 @Composable
 fun EventCard(event: EventItem) {
     androidx.compose.material3.Card(
@@ -148,7 +148,7 @@ fun EventCard(event: EventItem) {
         ) {
             //Name
             Text(
-                text = event.title ?: "No title",
+                text = event.title,
                 style = androidx.compose.material3.MaterialTheme.typography.titleMedium
             )
 
