@@ -32,17 +32,23 @@ import org.json.JSONObject
 import com.example.mobileapp.model.EventItem
 import com.example.mobileapp.model.EventDate
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.location.Geocoder
+import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import com.example.mobileapp.model.EventLocationMap
+import com.example.mobileapp.model.TicketInfo
+import com.example.mobileapp.model.Venue
 import java.util.Locale
 
 
@@ -63,29 +69,30 @@ class MainActivity : ComponentActivity(), LocationListener {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
         requestLocationPermission()
 
-        // Search with default city before gps
-        //fetchEvents("Dublin")
-
         setContent {
+
             var currentScreen by remember { mutableStateOf("home") }
+            var selectedEvent by remember { mutableStateOf<EventItem?>(null) }
 
             val favorites = remember { mutableStateListOf<EventItem>() }
 
             Scaffold(
                 bottomBar = {
-                    NavigationBar {
-                        NavigationBarItem(
-                            selected = currentScreen == "home",
-                            onClick = { currentScreen = "home" },
-                            icon = { Text("🏠") },
-                            label = { Text("Home") }
-                        )
-                        NavigationBarItem(
-                            selected = currentScreen == "favorites",
-                            onClick = { currentScreen = "favorites" },
-                            icon = { Text("⭐") },
-                            label = { Text("Favorites") }
-                        )
+                    if (currentScreen != "details") {
+                        NavigationBar {
+                            NavigationBarItem(
+                                selected = currentScreen == "home",
+                                onClick = { currentScreen = "home" },
+                                icon = { Text("🏠") },
+                                label = { Text("Home") }
+                            )
+                            NavigationBarItem(
+                                selected = currentScreen == "favorites",
+                                onClick = { currentScreen = "favorites" },
+                                icon = { Text("⭐") },
+                                label = { Text("Favorites") }
+                            )
+                        }
                     }
                 }
             ) { innerPadding ->
@@ -95,24 +102,39 @@ class MainActivity : ComponentActivity(), LocationListener {
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
+
                     when (currentScreen) {
+
                         "home" -> HomeScreen(
                             eventList = eventList,
                             fetchEvents = { fetchEvents(it) },
-                            favoriteList = favorites
+                            favoriteList = favorites,
+                            onEventClick = { event ->
+                                selectedEvent = event
+                                currentScreen = "details"
+                            }
                         )
 
                         "favorites" -> FavoriteScreen(
-                            favorites = favorites
+                            favorites = favorites,
+                            onEventClick = { event ->
+                                selectedEvent = event
+                                currentScreen = "details"
+                            }
+                        )
+
+                        "details" -> EventDetailsScreen(
+                            event = selectedEvent!!,
+                            onBack = {
+                                currentScreen = "home"
+                            }
                         )
                     }
                 }
             }
         }
 
-
     }
-
 
     // gps Request permission
     private fun requestLocationPermission() {
@@ -145,6 +167,7 @@ class MainActivity : ComponentActivity(), LocationListener {
 
         Log.d("GPS", "New location: $lat, $lon")
 
+        //Transform coordinates into city
         val geocoder = Geocoder(this, Locale.getDefault())
         val result = geocoder.getFromLocation(lat, lon, 1)
 
@@ -176,7 +199,6 @@ class MainActivity : ComponentActivity(), LocationListener {
                 val body = response.body?.string()
                 Log.d("SerpApi", "Response body: $body")
 
-
                 if (body.isNullOrEmpty()) {
                     Log.e("SerpApi", "Empty response body.")
                     return@launch
@@ -188,9 +210,12 @@ class MainActivity : ComponentActivity(), LocationListener {
                 eventList.clear()
                 if (results != null) {
                     for (i in 0 until results.length()) {
+
                         val obj = results.getJSONObject(i)
+
                         val title = obj.optString("title", "No title")
 
+                        // Address
                         val addressArr = obj.optJSONArray("address")
                         val addressList = mutableListOf<String>()
                         if (addressArr != null) {
@@ -198,18 +223,73 @@ class MainActivity : ComponentActivity(), LocationListener {
                                 addressList.add(addressArr.getString(j))
                             }
                         }
-
+                        // Date
                         val dateObj = obj.optJSONObject("date")
                         val whenText = dateObj?.optString("when", "No date") ?: "No date"
 
+                        // Description
+                        val description = obj.optString("description", null)
+
+                        // Link
+                        val link = obj.optString("link", null)
+
+                        // Venue
+                        val venueObj = obj.optJSONObject("venue")
+                        val venueName = venueObj?.optString("name")
+                        val venueRating = venueObj?.optDouble("rating")
+                        val venueReviews = venueObj?.optInt("reviews")
+                        val venueLink = venueObj?.optString("link")
+
+                        val venue = if (venueObj != null) {
+                            Venue(
+                                name = venueName,
+                                rating = venueRating,
+                                reviews = venueReviews,
+                                link = venueLink
+                            )
+                        } else null
+
+                        // Ticket Info
+                        val ticketArray = obj.optJSONArray("ticket_info")
+                        val ticketList = mutableListOf<TicketInfo>()
+                        if (ticketArray != null) {
+                            for (j in 0 until ticketArray.length()) {
+                                val t = ticketArray.getJSONObject(j)
+                                ticketList.add(
+                                    TicketInfo(
+                                        source = t.optString("source", null),
+                                        link = t.optString("link", null),
+                                        linkType = t.optString("link_type", null)
+                                    )
+                                )
+                            }
+                        }
+
+                        // Event Location Map
+                        val mapObj = obj.optJSONObject("event_location_map")
+                        val eventLocationMap = if (mapObj != null) {
+                            EventLocationMap(
+                                image = mapObj.optString("image", null),
+                                link = mapObj.optString("link", null),
+                                serpapiLink = mapObj.optString("serpapi_link", null)
+                            )
+                        } else null
+
+                        // Add the final event
                         eventList.add(
                             EventItem(
-                                title = title ?: "No title",
+                                title = title,
                                 address = addressList,
-                                date = EventDate(startDate = "", whenText = whenText)
+                                date = EventDate(startDate = "", whenText = whenText),
+                                description = description,
+                                ticketInfo = ticketList,
+                                venue = venue,
+                                eventLocationMap = eventLocationMap,
+                                link = link
                             )
                         )
                     }
+
                     Log.d("SerpApi", "Loaded ${eventList.size} events for $city.")
                 } else {
                     Log.e("SerpApi", "No 'events_results' array found.")
@@ -220,18 +300,21 @@ class MainActivity : ComponentActivity(), LocationListener {
             }
         }
     }
+
 }
 
 @Composable
 fun EventCard(
     event: EventItem,
     onSave: () -> Unit,
-    isFavorite: Boolean
+    isFavorite: Boolean,
+    onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 6.dp)
+            .clickable { onClick() }, // ← clique para abrir detalhes
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Row(
@@ -265,7 +348,7 @@ fun EventCard(
                 )
             }
 
-            // Botão de favoritos sem icons — usando unicode
+            // Favorite button
             Text(
                 text = if (isFavorite) "★" else "☆",
                 modifier = Modifier
@@ -281,11 +364,18 @@ fun EventCard(
 
 
 
+
 @Composable
-fun HomeScreen(eventList: List<EventItem>, fetchEvents: (String) -> Unit, favoriteList: MutableList<EventItem>) {
+fun HomeScreen(
+    eventList: List<EventItem>,
+    fetchEvents: (String) -> Unit,
+    favoriteList: MutableList<EventItem>,
+    onEventClick: (EventItem) -> Unit
+) {
     var city by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.padding(16.dp)) {
+
         TextField(
             value = city,
             onValueChange = { city = it },
@@ -311,25 +401,37 @@ fun HomeScreen(eventList: List<EventItem>, fetchEvents: (String) -> Unit, favori
                 EventCard(
                     event = event,
                     isFavorite = favoriteList.contains(event),
+
                     onSave = {
                         if (favoriteList.contains(event)) {
                             favoriteList.remove(event)
                         } else {
                             favoriteList.add(event)
                         }
+                    },
+
+                    // go to details screen
+                    onClick = {
+                        onEventClick(event)
                     }
                 )
-
-
             }
         }
     }
 }
 
+
 @Composable
-fun FavoriteScreen(favorites: List<EventItem>) {
+fun FavoriteScreen(
+    favorites: List<EventItem>,
+    onEventClick: (EventItem) -> Unit
+) {
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("Saved Events", style = MaterialTheme.typography.titleLarge)
+
+        Text(
+            "Saved Events",
+            style = MaterialTheme.typography.titleLarge
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -338,16 +440,125 @@ fun FavoriteScreen(favorites: List<EventItem>) {
                 EventCard(
                     event = event,
                     isFavorite = true,
+
                     onSave = {
                         (favorites as MutableList<EventItem>).remove(event)
+                    },
+
+                    // go to details screen
+                    onClick = {
+                        onEventClick(event)
                     }
                 )
-
-
             }
         }
-
     }
 }
+
+
+@Composable
+fun EventDetailsScreen(event: EventItem, onBack: () -> Unit) {
+
+    val context = LocalContext.current
+
+    fun openUrl(url: String?) {
+        if (!url.isNullOrEmpty()) {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            context.startActivity(intent)
+        }
+    }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+
+        // Back button
+        Text(
+            text = "← Back",
+            modifier = Modifier
+                .padding(bottom = 12.dp)
+                .clickable { onBack() },
+            style = MaterialTheme.typography.titleMedium
+        )
+
+        // Title
+        Text(event.title, style = MaterialTheme.typography.titleLarge)
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Description
+        if (!event.description.isNullOrEmpty()) {
+            Text(event.description!!, style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // Address
+        Text(
+            text = event.address?.joinToString(", ") ?: "No address",
+            style = MaterialTheme.typography.bodyMedium.copy(color = Color.Gray)
+        )
+
+        // Date
+        Text(
+            text = event.date?.whenText ?: "No date",
+            style = MaterialTheme.typography.bodyMedium.copy(color = Color.Gray)
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Event main link
+        if (!event.link.isNullOrEmpty()) {
+            Text(
+                text = "Open Event Page",
+                color = Color(0xFF1E88E5),
+                modifier = Modifier.clickable { openUrl(event.link) }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // Venue
+        if (event.venue != null) {
+            Text("Venue: ${event.venue.name}")
+            Text("Rating: ${event.venue.rating} ⭐ (${event.venue.reviews} reviews)")
+            if (!event.venue.link.isNullOrEmpty()) {
+                Text(
+                    text = "Open Venue Page",
+                    color = Color(0xFF1E88E5),
+                    modifier = Modifier.clickable { openUrl(event.venue.link) }
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // Tickets list
+        if (!event.ticketInfo.isNullOrEmpty()) {
+            Text("Tickets:", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(4.dp))
+
+            event.ticketInfo!!.forEach { ticket ->
+                Text(
+                    "- ${ticket.source} (${ticket.linkType})",
+                    color = Color(0xFF1E88E5),
+                    modifier = Modifier.clickable {
+                        openUrl(ticket.link)
+                    }
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // Event location map
+        if (event.eventLocationMap?.link != null) {
+            Text(
+                text = "Open Map",
+                color = Color(0xFF1E88E5),
+                modifier = Modifier.clickable {
+                    openUrl(event.eventLocationMap.link)
+                }
+            )
+        }
+    }
+}
+
+
+
 
 
